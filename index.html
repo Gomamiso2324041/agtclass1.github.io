@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>みかんアドベンチャー</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #f0f9ff;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            touch-action: manipulation;
+        }
+        canvas {
+            display: block;
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F7FA 100%);
+            width: 100%;
+            height: 100%;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+        }
+        .btn {
+            pointer-events: auto;
+            background: rgba(255, 255, 255, 0.8);
+            border: 2px solid #ff9800;
+            border-radius: 50%;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #ff9800;
+            user-select: none;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: transform 0.1s;
+        }
+        .btn:active {
+            transform: scale(0.9);
+        }
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            display: none;
+            pointer-events: auto;
+            z-index: 100;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-layer">
+        <div class="flex justify-between items-start">
+            <div class="bg-white/80 p-2 rounded-lg border-2 border-orange-400">
+                <span class="text-orange-600 font-bold">SCORE: <span id="score-val">0</span></span>
+            </div>
+            <div id="status-msg" class="text-orange-800 font-bold text-xl drop-shadow-sm"></div>
+        </div>
+        
+        <div class="flex justify-end p-4">
+            <div id="jump-btn" class="btn text-xl">JUMP</div>
+        </div>
+    </div>
+
+    <div id="game-over">
+        <h1 id="over-title" class="text-3xl font-bold text-orange-600 mb-4">GAME OVER</h1>
+        <p class="mb-6 text-gray-600">最終スコア: <span id="final-score">0</span></p>
+        <button id="restart-btn" class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-8 rounded-full transition shadow-lg">
+            もういちど遊ぶ
+        </button>
+    </div>
+
+<script>
+/**
+ * みかんアドベンチャー
+ * アクションゲームのロジック (ジャンプ高度・アイテム高度 調整版)
+ */
+
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const scoreDisplay = document.getElementById('score-val');
+const finalScoreDisplay = document.getElementById('final-score');
+const gameOverScreen = document.getElementById('game-over');
+const restartBtn = document.getElementById('restart-btn');
+const jumpBtn = document.getElementById('jump-btn');
+const statusMsg = document.getElementById('status-msg');
+
+// ゲーム設定
+let gameActive = true;
+let score = 0;
+let animationId;
+
+// キャンバスサイズ調整
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// みかん（プレイヤー）オブジェクト
+const mikan = {
+    x: 100,
+    y: 0,
+    width: 50,
+    height: 50,
+    vy: 0,
+    gravity: 0.65, // 重力を微調整
+    jumpPower: -15.0, // ジャンプ力を微調整
+    grounded: false,
+    rotation: 0,
+    
+    update() {
+        this.vy += this.gravity;
+        this.y += this.vy;
+        
+        // 地面との当たり判定
+        const groundY = canvas.height - 100;
+        if (this.y + this.height > groundY) {
+            this.y = groundY - this.height;
+            this.vy = 0;
+            this.grounded = true;
+        } else {
+            this.grounded = false;
+        }
+
+        // 回転アニメーション
+        if (gameActive) {
+            this.rotation += 0.15;
+        }
+    },
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+        ctx.rotate(this.rotation);
+
+        // みかん本体
+        ctx.beginPath();
+        ctx.arc(0, 0, this.width / 2, 0, Math.PI * 2);
+        ctx.fillStyle = '#FF9800';
+        ctx.fill();
+        ctx.strokeStyle = '#E65100';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // 葉っぱ
+        ctx.beginPath();
+        ctx.ellipse(0, -this.height/2, 10, 5, Math.PI/4, 0, Math.PI * 2);
+        ctx.fillStyle = '#4CAF50';
+        ctx.fill();
+
+        // 目
+        ctx.fillStyle = 'white';
+        ctx.beginPath();
+        ctx.arc(-10, -5, 5, 0, Math.PI * 2);
+        ctx.arc(10, -5, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.arc(-10, -5, 2, 0, Math.PI * 2);
+        ctx.arc(10, -5, 2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 口
+        ctx.beginPath();
+        ctx.arc(0, 5, 8, 0.2, Math.PI - 0.2);
+        ctx.stroke();
+
+        ctx.restore();
+    },
+
+    jump() {
+        if (this.grounded) {
+            this.vy = this.jumpPower;
+            this.grounded = false;
+        }
+    }
+};
+
+// 障害物
+class Obstacle {
+    constructor() {
+        this.width = 40 + Math.random() * 20;
+        this.height = 40 + Math.random() * 40; 
+        this.x = canvas.width + 100;
+        this.y = canvas.height - 100 - this.height;
+        this.speed = 6 + Math.min(score / 600, 7);
+        this.type = Math.random() > 0.4 ? 'box' : 'spike';
+    }
+
+    update() {
+        this.x -= this.speed;
+    }
+
+    draw() {
+        ctx.fillStyle = this.type === 'box' ? '#795548' : '#607D8B';
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 2;
+        if (this.type === 'box') {
+            ctx.fillRect(this.x, this.y, this.width, this.height);
+            ctx.strokeRect(this.x, this.y, this.width, this.height);
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(this.x, this.y + this.height);
+            ctx.lineTo(this.x + this.width / 2, this.y);
+            ctx.lineTo(this.x + this.width, this.y + this.height);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
+    }
+}
+
+// アイテム
+class Item {
+    constructor() {
+        const rand = Math.random();
+        if (rand > 0.95) {
+            this.type = 'melon';
+            this.color = '#8BC34A';
+            this.textColor = '#1B5E20';
+            this.label = 'M';
+            this.points = 500;
+            this.size = 35;
+        } else if (rand > 0.75) {
+            this.type = 'strawberry';
+            this.color = '#F44336';
+            this.textColor = '#FFEB3B';
+            this.label = 'S';
+            this.points = 150;
+            this.size = 28;
+        } else {
+            this.type = 'coin';
+            this.color = '#FFD700';
+            this.textColor = '#E65100';
+            this.label = '$';
+            this.points = 50;
+            this.size = 22;
+        }
+
+        this.x = canvas.width + 100;
+        
+        /**
+         * 高さ調整のロジック:
+         * ジャンプの最大高度 H = (vy^2) / (2 * g)
+         * この設定では (-15^2) / (2 * 0.65) ≒ 173px
+         * 地面からの高さを 60px（低め）〜 170px（最高点）に設定
+         */
+        const maxJumpHeight = (Math.pow(mikan.jumpPower, 2)) / (2 * mikan.gravity);
+        const minH = 60; 
+        const maxH = maxJumpHeight - 10; // 余裕を持って最高点より少し下に
+        
+        this.y = canvas.height - 100 - (minH + Math.random() * (maxH - minH));
+        this.speed = 5.5;
+        this.pulse = 0;
+    }
+
+    update() {
+        this.x -= this.speed;
+        this.pulse += 0.1;
+    }
+
+    draw() {
+        const pulseSize = Math.sin(this.pulse) * 3;
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, (this.size + pulseSize) / 2, 0, Math.PI * 2);
+        ctx.fillStyle = this.color;
+        ctx.fill();
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+        
+        ctx.fillStyle = this.textColor;
+        ctx.font = `bold ${this.size * 0.6}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(this.label, this.x, this.y + 1);
+        ctx.restore();
+    }
+}
+
+let obstacles = [];
+let items = [];
+let spawnTimer = 0;
+let itemTimer = 0;
+
+function resetGame() {
+    gameActive = true;
+    score = 0;
+    obstacles = [];
+    items = [];
+    mikan.y = canvas.height - 100 - mikan.height;
+    mikan.vy = 0;
+    spawnTimer = 0;
+    itemTimer = 0;
+    scoreDisplay.innerText = "0";
+    gameOverScreen.style.display = "none";
+    statusMsg.innerText = "READY!";
+    setTimeout(() => { if(gameActive) statusMsg.innerText = ""; }, 1500);
+    
+    cancelAnimationFrame(animationId);
+    requestAnimationFrame(gameLoop);
+}
+
+function endGame() {
+    gameActive = false;
+    finalScoreDisplay.innerText = score;
+    gameOverScreen.style.display = "block";
+}
+
+function checkCollision(a, b) {
+    const padding = 10;
+    return a.x + padding < b.x + b.width &&
+           a.x + a.width - padding > b.x &&
+           a.y + padding < b.y + b.height &&
+           a.y + a.height - padding > b.y;
+}
+
+function gameLoop() {
+    if (!gameActive) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 地面の描画
+    ctx.fillStyle = '#8BC34A';
+    ctx.fillRect(0, canvas.height - 100, canvas.width, 100);
+    ctx.fillStyle = '#7CB342';
+    ctx.fillRect(0, canvas.height - 100, canvas.width, 10);
+
+    // みかんの更新と描画
+    mikan.update();
+    mikan.draw();
+
+    // 障害物の生成
+    spawnTimer++;
+    if (spawnTimer > Math.max(60, 140 - (score/25))) {
+        obstacles.push(new Obstacle());
+        spawnTimer = 0;
+    }
+
+    // アイテムの生成
+    itemTimer++;
+    if (itemTimer > 110) {
+        items.push(new Item());
+        itemTimer = 0;
+    }
+
+    // 障害物の処理
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].update();
+        obstacles[i].draw();
+
+        if (checkCollision(mikan, obstacles[i])) {
+            endGame();
+        }
+
+        if (obstacles[i].x + obstacles[i].width < 0) {
+            obstacles.splice(i, 1);
+            score += 10;
+            scoreDisplay.innerText = score;
+        }
+    }
+
+    // アイテムの処理
+    for (let i = items.length - 1; i >= 0; i--) {
+        items[i].update();
+        items[i].draw();
+
+        const dx = (mikan.x + mikan.width/2) - items[i].x;
+        const dy = (mikan.y + mikan.height/2) - items[i].y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        
+        // 当たり判定を少し広めに設定 (みかんの半径 + アイテムの半径 + バッファ)
+        if (dist < (mikan.width/2 + items[i].size/2 + 5)) {
+            const points = items[i].points;
+            score += points;
+            scoreDisplay.innerText = score;
+            
+            let msg = `+${points}`;
+            if (items[i].type === 'melon') msg = "LEGENDARY!! +500";
+            else if (items[i].type === 'strawberry') msg = "DELICIOUS! +150";
+            
+            statusMsg.innerText = msg;
+            statusMsg.style.color = items[i].color;
+            
+            items.splice(i, 1);
+            setTimeout(() => { if(gameActive) statusMsg.innerText = ""; }, 1000);
+        } else if (items[i].x < -50) {
+            items.splice(i, 1);
+        }
+    }
+
+    animationId = requestAnimationFrame(gameLoop);
+}
+
+// 入力イベント
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'ArrowUp') {
+        mikan.jump();
+    }
+});
+
+jumpBtn.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    mikan.jump();
+}, {passive: false});
+
+jumpBtn.addEventListener('mousedown', (e) => {
+    mikan.jump();
+});
+
+restartBtn.addEventListener('click', resetGame);
+
+// 初回起動
+window.onload = () => {
+    resize();
+    resetGame();
+};
+</script>
+</body>
+</html>
